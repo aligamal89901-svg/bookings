@@ -17,17 +17,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Prepare Android Project Files
         run: |
-          if [ -f "hadhrami_bookings_android.zip" ]; then
-            unzip -o hadhrami_bookings_android.zip
-            if [ -d "hadhrami_bookings_android" ]; then
-              cp -r hadhrami_bookings_android/* .
-            fi
-          fi
           mkdir -p app/src/main/java/com/hadhrami/bookings
 
           cat << 'EOF' > settings.gradle.kts
@@ -108,6 +99,7 @@ jobs:
               implementation("androidx.activity:activity-compose:1.8.2")
               implementation("androidx.compose.ui:ui")
               implementation("androidx.compose.material3:material3")
+              implementation("androidx.compose.material:material-icons-core")
           }
           EOF
 
@@ -125,7 +117,7 @@ jobs:
                       android:windowSoftInputMode="adjustResize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.action.LAUNCHER" />
+                          <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
               </application>
@@ -134,12 +126,11 @@ jobs:
 
           cat << 'EOF' > app/src/main/java/com/hadhrami/bookings/MainActivity.kt
           package com.hadhrami.bookings
-          
+
           import android.content.Context
           import android.os.Bundle
           import androidx.activity.ComponentActivity
           import androidx.activity.compose.setContent
-          import androidx.compose.animation.AnimatedVisibility
           import androidx.compose.animation.core.animateFloatAsState
           import androidx.compose.foundation.BorderStroke
           import androidx.compose.foundation.background
@@ -170,7 +161,7 @@ jobs:
           import org.json.JSONArray
           import org.json.JSONObject
           import java.util.UUID
-          
+
           data class BookingItem(
               val id: String = UUID.randomUUID().toString(),
               val customerName: String,
@@ -181,7 +172,7 @@ jobs:
               val isReady: Boolean = false,
               val createdAt: Long = System.currentTimeMillis()
           )
-          
+
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
@@ -202,28 +193,28 @@ jobs:
                   }
               }
           }
-          
+
           @Composable
           fun BookingsScreen() {
               val context = LocalContext.current
               var bookings by remember { mutableStateOf(loadBookings(context)) }
               var filterMode by remember { mutableStateOf("all") }
-          
+
               var nameInput by remember { mutableStateOf("") }
               var kiloValue by remember { mutableStateOf(1.0) }
               var needsGrocery by remember { mutableStateOf(false) }
               var groceryInput by remember { mutableStateOf("") }
               var needsDelivery by remember { mutableStateOf(false) }
-          
+
               fun persist(updated: List<BookingItem>) {
                   bookings = updated
                   saveBookings(context, updated)
               }
-          
+
               val pendingList = bookings.filter { !it.isReady }
               val pendingKilos = pendingList.sumOf { it.kilos }
               val totalKilos = bookings.sumOf { it.kilos }
-          
+
               val displayedBookings = remember(bookings, filterMode) {
                   val filtered = when (filterMode) {
                       "pending" -> bookings.filter { !it.isReady }
@@ -232,7 +223,7 @@ jobs:
                   }
                   filtered.sortedWith(compareBy<BookingItem> { it.isReady }.thenByDescending { it.createdAt })
               }
-          
+
               Scaffold(
                   containerColor = Color(0xFFF6F5F0)
               ) { padding ->
@@ -263,7 +254,7 @@ jobs:
                                       color = Color(0xFF646A67)
                                   )
                               }
-          
+
                               Surface(
                                   color = Color(0xFFE8E6DF),
                                   shape = RoundedCornerShape(12.dp)
@@ -278,7 +269,7 @@ jobs:
                               }
                           }
                       }
-          
+
                       item {
                           Surface(
                               shape = RoundedCornerShape(18.dp),
@@ -297,7 +288,7 @@ jobs:
                                       modifier = Modifier.fillMaxWidth(),
                                       shape = RoundedCornerShape(12.dp)
                                   )
-          
+
                                   Row(
                                       modifier = Modifier.fillMaxWidth(),
                                       horizontalArrangement = Arrangement.SpaceBetween,
@@ -318,14 +309,14 @@ jobs:
                                           ) {
                                               Text("−", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1C1E1D))
                                           }
-          
+
                                           Text(
                                               text = "${formatKilo(kiloValue)} كيلو",
                                               fontSize = 16.sp,
                                               fontWeight = FontWeight.Bold,
                                               color = Color(0xFF1E3A2F)
                                           )
-          
+
                                           Box(
                                               modifier = Modifier
                                                   .size(36.dp)
@@ -338,7 +329,7 @@ jobs:
                                           }
                                       }
                                   }
-          
+
                                   Row(
                                       modifier = Modifier.fillMaxWidth(),
                                       horizontalArrangement = Arrangement.SpaceBetween,
@@ -350,18 +341,17 @@ jobs:
                                           onCheckedChange = { needsGrocery = it }
                                       )
                                   }
-          
-                                  AnimatedVisibility(visible = needsGrocery) {
+
+                                  if (needsGrocery) {
                                       OutlinedTextField(
                                           value = groceryInput,
                                           onValueChange = { groceryInput = it },
                                           label = { Text("اكتب الأغراض المطلوبة من البقالة...") },
                                           modifier = Modifier.fillMaxWidth(),
-                                          minLines = 2,
                                           shape = RoundedCornerShape(12.dp)
                                       )
                                   }
-          
+
                                   Row(
                                       modifier = Modifier.fillMaxWidth(),
                                       horizontalArrangement = Arrangement.SpaceBetween,
@@ -373,7 +363,7 @@ jobs:
                                           onCheckedChange = { needsDelivery = it }
                                       )
                                   }
-          
+
                                   Button(
                                       onClick = {
                                           if (nameInput.isNotBlank()) {
@@ -401,7 +391,7 @@ jobs:
                               }
                           }
                       }
-          
+
                       item {
                           Row(
                               modifier = Modifier
@@ -416,7 +406,7 @@ jobs:
                               FilterTabButton("جاهز (${bookings.size - pendingList.size})", filterMode == "ready", Modifier.weight(1f)) { filterMode = "ready" }
                           }
                       }
-          
+
                       items(displayedBookings, key = { it.id }) { item ->
                           BookingRowCard(
                               item = item,
@@ -433,7 +423,7 @@ jobs:
                   }
               }
           }
-          
+
           @Composable
           fun FilterTabButton(title: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
               Surface(
@@ -451,11 +441,11 @@ jobs:
                   }
               }
           }
-          
+
           @Composable
           fun BookingRowCard(item: BookingItem, onToggleReady: () -> Unit, onDelete: () -> Unit) {
               val cardAlpha by animateFloatAsState(targetValue = if (item.isReady) 0.44f else 1f, label = "dimming")
-          
+
               Surface(
                   modifier = Modifier
                       .fillMaxWidth()
@@ -497,7 +487,7 @@ jobs:
                                       )
                                   }
                               }
-          
+
                               Row(
                                   verticalAlignment = Alignment.CenterVertically,
                                   horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -509,7 +499,7 @@ jobs:
                                       color = Color(0xFF1C1E1D),
                                       textDecoration = if (item.isReady) TextDecoration.LineThrough else TextDecoration.None
                                   )
-          
+
                                   if (item.isReady) {
                                       Surface(color = Color(0xFFD7E5DD), shape = RoundedCornerShape(6.dp)) {
                                           Text(
@@ -521,7 +511,7 @@ jobs:
                                           )
                                       }
                                   }
-          
+
                                   if (item.needsDelivery) {
                                       Surface(color = Color(0xFFF2ECE1), shape = RoundedCornerShape(6.dp)) {
                                           Text(
@@ -535,7 +525,7 @@ jobs:
                                   }
                               }
                           }
-          
+
                           Row(
                               verticalAlignment = Alignment.CenterVertically,
                               horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -549,7 +539,7 @@ jobs:
                                       color = Color(0xFF1E3A2F)
                                   )
                               }
-          
+
                               IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
                                   Icon(
                                       imageVector = Icons.Default.Close,
@@ -560,7 +550,7 @@ jobs:
                               }
                           }
                       }
-          
+
                       if (item.needsGrocery && item.groceryText.isNotBlank()) {
                           Spacer(Modifier.height(10.dp))
                           Box(
@@ -580,11 +570,11 @@ jobs:
                   }
               }
           }
-          
+
           fun formatKilo(k: Double): String {
               return if (k % 1.0 == 0.0) k.toInt().toString() else k.toString()
           }
-          
+
           fun saveBookings(context: Context, list: List<BookingItem>) {
               val arr = JSONArray()
               list.forEach { item ->
@@ -605,7 +595,7 @@ jobs:
                   .putString("items", arr.toString())
                   .apply()
           }
-          
+
           fun loadBookings(context: Context): List<BookingItem> {
               val raw = context.getSharedPreferences("bookings_prefs", Context.MODE_PRIVATE)
                   .getString("items", null) ?: return emptyList()
