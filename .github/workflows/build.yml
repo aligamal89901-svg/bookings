@@ -1,0 +1,645 @@
+name: Build Android APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Android Project Files
+        run: |
+          if [ -f "hadhrami_bookings_android.zip" ]; then
+            unzip -o hadhrami_bookings_android.zip
+            if [ -d "hadhrami_bookings_android" ]; then
+              cp -r hadhrami_bookings_android/* .
+            fi
+          fi
+          mkdir -p app/src/main/java/com/hadhrami/bookings
+
+          cat << 'EOF' > settings.gradle.kts
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "HadhramiBookings"
+          include(":app")
+          EOF
+
+          cat << 'EOF' > build.gradle.kts
+          plugins {
+              id("com.android.application") version "8.2.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.22" apply false
+          }
+          EOF
+
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat << 'EOF' > app/build.gradle.kts
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.hadhrami.bookings"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.hadhrami.bookings"
+                  minSdk = 24
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+              buildFeatures {
+                  compose = true
+              }
+              composeOptions {
+                  kotlinCompilerExtensionVersion = "1.5.10"
+              }
+          }
+
+          dependencies {
+              val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
+              implementation(composeBom)
+              implementation("androidx.core:core-ktx:1.12.0")
+              implementation("androidx.activity:activity-compose:1.8.2")
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.material3:material3")
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="true"
+                  android:label="حجوزات الثلاثاء"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.action.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/hadhrami/bookings/MainActivity.kt
+          package com.hadhrami.bookings
+          
+          import android.content.Context
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.compose.animation.AnimatedVisibility
+          import androidx.compose.animation.core.animateFloatAsState
+          import androidx.compose.foundation.BorderStroke
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.border
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.Check
+          import androidx.compose.material.icons.filled.Close
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.alpha
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.platform.LocalLayoutDirection
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.style.TextDecoration
+          import androidx.compose.ui.unit.LayoutDirection
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.util.UUID
+          
+          data class BookingItem(
+              val id: String = UUID.randomUUID().toString(),
+              val customerName: String,
+              val kilos: Double,
+              val needsGrocery: Boolean,
+              val groceryText: String,
+              val needsDelivery: Boolean,
+              val isReady: Boolean = false,
+              val createdAt: Long = System.currentTimeMillis()
+          )
+          
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContent {
+                      CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                          MaterialTheme(
+                              colorScheme = lightColorScheme(
+                                  primary = Color(0xFF1E3A2F),
+                                  onPrimary = Color.White,
+                                  background = Color(0xFFF6F5F0),
+                                  surface = Color.White,
+                                  onSurface = Color(0xFF1C1E1D)
+                              )
+                          ) {
+                              BookingsScreen()
+                          }
+                      }
+                  }
+              }
+          }
+          
+          @Composable
+          fun BookingsScreen() {
+              val context = LocalContext.current
+              var bookings by remember { mutableStateOf(loadBookings(context)) }
+              var filterMode by remember { mutableStateOf("all") }
+          
+              var nameInput by remember { mutableStateOf("") }
+              var kiloValue by remember { mutableStateOf(1.0) }
+              var needsGrocery by remember { mutableStateOf(false) }
+              var groceryInput by remember { mutableStateOf("") }
+              var needsDelivery by remember { mutableStateOf(false) }
+          
+              fun persist(updated: List<BookingItem>) {
+                  bookings = updated
+                  saveBookings(context, updated)
+              }
+          
+              val pendingList = bookings.filter { !it.isReady }
+              val pendingKilos = pendingList.sumOf { it.kilos }
+              val totalKilos = bookings.sumOf { it.kilos }
+          
+              val displayedBookings = remember(bookings, filterMode) {
+                  val filtered = when (filterMode) {
+                      "pending" -> bookings.filter { !it.isReady }
+                      "ready" -> bookings.filter { it.isReady }
+                      else -> bookings
+                  }
+                  filtered.sortedWith(compareBy<BookingItem> { it.isReady }.thenByDescending { it.createdAt })
+              }
+          
+              Scaffold(
+                  containerColor = Color(0xFFF6F5F0)
+              ) { padding ->
+                  LazyColumn(
+                      modifier = Modifier
+                          .fillMaxSize()
+                          .padding(padding)
+                          .padding(horizontal = 16.dp),
+                      verticalArrangement = Arrangement.spacedBy(12.dp),
+                      contentPadding = PaddingValues(top = 16.dp, bottom = 40.dp)
+                  ) {
+                      item {
+                          Row(
+                              modifier = Modifier.fillMaxWidth(),
+                              horizontalArrangement = Arrangement.SpaceBetween,
+                              verticalAlignment = Alignment.CenterVertically
+                          ) {
+                              Column {
+                                  Text(
+                                      text = "حجوزات الثلاثاء",
+                                      fontSize = 21.sp,
+                                      fontWeight = FontWeight.Bold,
+                                      color = Color(0xFF1C1E1D)
+                                  )
+                                  Text(
+                                      text = "المتبقي للتجهيز: ${formatKilo(pendingKilos)} كيلو (${pendingList.size} حجز)",
+                                      fontSize = 13.sp,
+                                      color = Color(0xFF646A67)
+                                  )
+                              }
+          
+                              Surface(
+                                  color = Color(0xFFE8E6DF),
+                                  shape = RoundedCornerShape(12.dp)
+                              ) {
+                                  Text(
+                                      text = "الإجمالي: ${formatKilo(totalKilos)} كجم",
+                                      modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                      fontSize = 13.sp,
+                                      fontWeight = FontWeight.Bold,
+                                      color = Color(0xFF1E3A2F)
+                                  )
+                              }
+                          }
+                      }
+          
+                      item {
+                          Surface(
+                              shape = RoundedCornerShape(18.dp),
+                              color = Color.White,
+                              border = BorderStroke(1.dp, Color(0xFFE6E4DC))
+                          ) {
+                              Column(
+                                  modifier = Modifier.padding(16.dp),
+                                  verticalArrangement = Arrangement.spacedBy(12.dp)
+                              ) {
+                                  OutlinedTextField(
+                                      value = nameInput,
+                                      onValueChange = { nameInput = it },
+                                      label = { Text("اسم الحاجز") },
+                                      singleLine = true,
+                                      modifier = Modifier.fillMaxWidth(),
+                                      shape = RoundedCornerShape(12.dp)
+                                  )
+          
+                                  Row(
+                                      modifier = Modifier.fillMaxWidth(),
+                                      horizontalArrangement = Arrangement.SpaceBetween,
+                                      verticalAlignment = Alignment.CenterVertically
+                                  ) {
+                                      Text("الكمية المطلوبة (بالكيلو)", fontSize = 13.sp, color = Color(0xFF555B58))
+                                      Row(
+                                          verticalAlignment = Alignment.CenterVertically,
+                                          horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                      ) {
+                                          Box(
+                                              modifier = Modifier
+                                                  .size(36.dp)
+                                                  .clip(RoundedCornerShape(10.dp))
+                                                  .background(Color(0xFFF6F5F0))
+                                                  .clickable { if (kiloValue > 0.5) kiloValue -= 0.5 },
+                                              contentAlignment = Alignment.Center
+                                          ) {
+                                              Text("−", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1C1E1D))
+                                          }
+          
+                                          Text(
+                                              text = "${formatKilo(kiloValue)} كيلو",
+                                              fontSize = 16.sp,
+                                              fontWeight = FontWeight.Bold,
+                                              color = Color(0xFF1E3A2F)
+                                          )
+          
+                                          Box(
+                                              modifier = Modifier
+                                                  .size(36.dp)
+                                                  .clip(RoundedCornerShape(10.dp))
+                                                  .background(Color(0xFFF6F5F0))
+                                                  .clickable { kiloValue += 0.5 },
+                                              contentAlignment = Alignment.Center
+                                          ) {
+                                              Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1C1E1D))
+                                          }
+                                      }
+                                  }
+          
+                                  Row(
+                                      modifier = Modifier.fillMaxWidth(),
+                                      horizontalArrangement = Arrangement.SpaceBetween,
+                                      verticalAlignment = Alignment.CenterVertically
+                                  ) {
+                                      Text("يحتاج بضاعة من البقالة؟", fontSize = 14.sp)
+                                      Switch(
+                                          checked = needsGrocery,
+                                          onCheckedChange = { needsGrocery = it }
+                                      )
+                                  }
+          
+                                  AnimatedVisibility(visible = needsGrocery) {
+                                      OutlinedTextField(
+                                          value = groceryInput,
+                                          onValueChange = { groceryInput = it },
+                                          label = { Text("اكتب الأغراض المطلوبة من البقالة...") },
+                                          modifier = Modifier.fillMaxWidth(),
+                                          minLines = 2,
+                                          shape = RoundedCornerShape(12.dp)
+                                      )
+                                  }
+          
+                                  Row(
+                                      modifier = Modifier.fillMaxWidth(),
+                                      horizontalArrangement = Arrangement.SpaceBetween,
+                                      verticalAlignment = Alignment.CenterVertically
+                                  ) {
+                                      Text("توصيل للبيت (مع رسوم)", fontSize = 14.sp)
+                                      Switch(
+                                          checked = needsDelivery,
+                                          onCheckedChange = { needsDelivery = it }
+                                      )
+                                  }
+          
+                                  Button(
+                                      onClick = {
+                                          if (nameInput.isNotBlank()) {
+                                              val newItem = BookingItem(
+                                                  customerName = nameInput.trim(),
+                                                  kilos = kiloValue,
+                                                  needsGrocery = needsGrocery,
+                                                  groceryText = if (needsGrocery) groceryInput.trim() else "",
+                                                  needsDelivery = needsDelivery
+                                              )
+                                              persist(listOf(newItem) + bookings)
+                                              nameInput = ""
+                                              kiloValue = 1.0
+                                              needsGrocery = false
+                                              groceryInput = ""
+                                              needsDelivery = false
+                                          }
+                                      },
+                                      modifier = Modifier.fillMaxWidth(),
+                                      colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A2F)),
+                                      shape = RoundedCornerShape(12.dp)
+                                  ) {
+                                      Text("إضافة الحجز", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+                                  }
+                              }
+                          }
+                      }
+          
+                      item {
+                          Row(
+                              modifier = Modifier
+                                  .fillMaxWidth()
+                                  .clip(RoundedCornerShape(12.dp))
+                                  .background(Color(0xFFEAE8E1))
+                                  .padding(4.dp),
+                              horizontalArrangement = Arrangement.spacedBy(4.dp)
+                          ) {
+                              FilterTabButton("الكل (${bookings.size})", filterMode == "all", Modifier.weight(1f)) { filterMode = "all" }
+                              FilterTabButton("قيد التجهيز (${pendingList.size})", filterMode == "pending", Modifier.weight(1f)) { filterMode = "pending" }
+                              FilterTabButton("جاهز (${bookings.size - pendingList.size})", filterMode == "ready", Modifier.weight(1f)) { filterMode = "ready" }
+                          }
+                      }
+          
+                      items(displayedBookings, key = { it.id }) { item ->
+                          BookingRowCard(
+                              item = item,
+                              onToggleReady = {
+                                  persist(bookings.map {
+                                      if (it.id == item.id) it.copy(isReady = !it.isReady) else it
+                                  })
+                              },
+                              onDelete = {
+                                  persist(bookings.filterNot { it.id == item.id })
+                              }
+                          )
+                      }
+                  }
+              }
+          }
+          
+          @Composable
+          fun FilterTabButton(title: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+              Surface(
+                  modifier = modifier.clickable { onClick() },
+                  shape = RoundedCornerShape(9.dp),
+                  color = if (selected) Color.White else Color.Transparent
+              ) {
+                  Box(modifier = Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                      Text(
+                          text = title,
+                          fontSize = 13.sp,
+                          fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                          color = if (selected) Color(0xFF1C1E1D) else Color(0xFF686E6B)
+                      )
+                  }
+              }
+          }
+          
+          @Composable
+          fun BookingRowCard(item: BookingItem, onToggleReady: () -> Unit, onDelete: () -> Unit) {
+              val cardAlpha by animateFloatAsState(targetValue = if (item.isReady) 0.44f else 1f, label = "dimming")
+          
+              Surface(
+                  modifier = Modifier
+                      .fillMaxWidth()
+                      .alpha(cardAlpha),
+                  shape = RoundedCornerShape(16.dp),
+                  color = if (item.isReady) Color(0xFFECEAE3) else Color.White,
+                  border = BorderStroke(1.dp, if (item.isReady) Color(0xFFDCD9CF) else Color(0xFFE6E4DC))
+              ) {
+                  Column(modifier = Modifier.padding(14.dp)) {
+                      Row(
+                          modifier = Modifier.fillMaxWidth(),
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.SpaceBetween
+                      ) {
+                          Row(
+                              verticalAlignment = Alignment.CenterVertically,
+                              horizontalArrangement = Arrangement.spacedBy(12.dp),
+                              modifier = Modifier.weight(1f)
+                          ) {
+                              Box(
+                                  modifier = Modifier
+                                      .size(36.dp)
+                                      .clip(CircleShape)
+                                      .background(if (item.isReady) Color(0xFF1E3A2F) else Color.Transparent)
+                                      .border(
+                                          width = 1.8.dp,
+                                          color = if (item.isReady) Color(0xFF1E3A2F) else Color(0xFFB8B5AC),
+                                          shape = CircleShape
+                                      )
+                                      .clickable { onToggleReady() },
+                                  contentAlignment = Alignment.Center
+                              ) {
+                                  if (item.isReady) {
+                                      Icon(
+                                          imageVector = Icons.Default.Check,
+                                          contentDescription = "جاهز",
+                                          tint = Color.White,
+                                          modifier = Modifier.size(18.dp)
+                                      )
+                                  }
+                              }
+          
+                              Row(
+                                  verticalAlignment = Alignment.CenterVertically,
+                                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                              ) {
+                                  Text(
+                                      text = item.customerName,
+                                      fontSize = 16.sp,
+                                      fontWeight = FontWeight.Bold,
+                                      color = Color(0xFF1C1E1D),
+                                      textDecoration = if (item.isReady) TextDecoration.LineThrough else TextDecoration.None
+                                  )
+          
+                                  if (item.isReady) {
+                                      Surface(color = Color(0xFFD7E5DD), shape = RoundedCornerShape(6.dp)) {
+                                          Text(
+                                              text = "جاهز",
+                                              modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                              fontSize = 11.sp,
+                                              fontWeight = FontWeight.Bold,
+                                              color = Color(0xFF1E3A2F)
+                                          )
+                                      }
+                                  }
+          
+                                  if (item.needsDelivery) {
+                                      Surface(color = Color(0xFFF2ECE1), shape = RoundedCornerShape(6.dp)) {
+                                          Text(
+                                              text = "توصيل",
+                                              modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                              fontSize = 11.sp,
+                                              fontWeight = FontWeight.Medium,
+                                              color = Color(0xFF7A5624)
+                                          )
+                                      }
+                                  }
+                              }
+                          }
+          
+                          Row(
+                              verticalAlignment = Alignment.CenterVertically,
+                              horizontalArrangement = Arrangement.spacedBy(8.dp)
+                          ) {
+                              Surface(color = Color(0xFFF3F1EA), shape = RoundedCornerShape(10.dp)) {
+                                  Text(
+                                      text = "${formatKilo(item.kilos)} كيلو",
+                                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                      fontSize = 13.sp,
+                                      fontWeight = FontWeight.Bold,
+                                      color = Color(0xFF1E3A2F)
+                                  )
+                              }
+          
+                              IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+                                  Icon(
+                                      imageVector = Icons.Default.Close,
+                                      contentDescription = "حذف",
+                                      tint = Color(0xFF9E9B93),
+                                      modifier = Modifier.size(16.dp)
+                                  )
+                              }
+                          }
+                      }
+          
+                      if (item.needsGrocery && item.groceryText.isNotBlank()) {
+                          Spacer(Modifier.height(10.dp))
+                          Box(
+                              modifier = Modifier
+                                  .fillMaxWidth()
+                                  .clip(RoundedCornerShape(10.dp))
+                                  .background(Color(0xFFF8F7F3))
+                                  .padding(horizontal = 12.dp, vertical = 8.dp)
+                          ) {
+                              Text(
+                                  text = "طلبات البقالة: ${item.groceryText}",
+                                  fontSize = 13.sp,
+                                  color = Color(0xFF454947)
+                              )
+                          }
+                      }
+                  }
+              }
+          }
+          
+          fun formatKilo(k: Double): String {
+              return if (k % 1.0 == 0.0) k.toInt().toString() else k.toString()
+          }
+          
+          fun saveBookings(context: Context, list: List<BookingItem>) {
+              val arr = JSONArray()
+              list.forEach { item ->
+                  val obj = JSONObject().apply {
+                      put("id", item.id)
+                      put("customerName", item.customerName)
+                      put("kilos", item.kilos)
+                      put("needsGrocery", item.needsGrocery)
+                      put("groceryText", item.groceryText)
+                      put("needsDelivery", item.needsDelivery)
+                      put("isReady", item.isReady)
+                      put("createdAt", item.createdAt)
+                  }
+                  arr.put(obj)
+              }
+              context.getSharedPreferences("bookings_prefs", Context.MODE_PRIVATE)
+                  .edit()
+                  .putString("items", arr.toString())
+                  .apply()
+          }
+          
+          fun loadBookings(context: Context): List<BookingItem> {
+              val raw = context.getSharedPreferences("bookings_prefs", Context.MODE_PRIVATE)
+                  .getString("items", null) ?: return emptyList()
+              return try {
+                  val arr = JSONArray(raw)
+                  (0 until arr.length()).map { i ->
+                      val o = arr.getJSONObject(i)
+                      BookingItem(
+                          id = o.optString("id"),
+                          customerName = o.optString("customerName"),
+                          kilos = o.optDouble("kilos", 1.0),
+                          needsGrocery = o.optBoolean("needsGrocery", false),
+                          groceryText = o.optString("groceryText", ""),
+                          needsDelivery = o.optBoolean("needsDelivery", false),
+                          isReady = o.optBoolean("isReady", false),
+                          createdAt = o.optLong("createdAt", 0L)
+                      )
+                  }
+              } catch (e: Exception) {
+                  emptyList()
+              }
+          }
+          EOF
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
+      - name: Build Debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Upload Ready APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HadhramiBookings-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
